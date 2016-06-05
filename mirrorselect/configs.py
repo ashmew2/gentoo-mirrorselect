@@ -67,7 +67,7 @@ def write_make_conf(output, config_path, var, mirror_string):
 	output.print_info('Modifying %s with new mirrors...\n' % config_path)
 	try:
 		config = open(config_path, 'r')
-		output.write('\tReading make.conf\n')
+		output.write('\tReading %s\n' % config_path)
 		lines = config.readlines()
 		config.close()
 		output.write('\tMoving to %s.backup\n' % config_path)
@@ -103,16 +103,27 @@ def write_repos_conf(output, config_path, var, value):
 	@param var: string; the variable to save teh value to.
 	@param value: string, the value to set var to
 	"""
+	output.write('\n')
+	output.print_info('Modifying %s with new mirrors...\n' % config_path)
 	try:
 		from configparser import ConfigParser
 	except ImportError:
 		from ConfigParser import ConfigParser
 	config = ConfigParser()
 	config.read(config_path)
+
 	if config.has_option('gentoo', var):
 		config.set('gentoo', var, value)
+
+		output.write('\tMoving %s to %s.backup\n' % (config_path, \
+			config_path))
+		shutil.move(config_path, config_path + '.backup')
+
+		output.write('\tWriting new %s\n' % config_path)
 		with open(config_path, 'w') as configfile:
 			config.write(configfile)
+
+		output.print_info('Done.\n')
 	else:
 		output.print_err("write_repos_conf(): Failed to find section 'gentoo',"
 			" variable: %s\nChanges NOT SAVED" %var)
