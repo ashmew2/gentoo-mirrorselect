@@ -122,8 +122,8 @@ def get_filesystem_mirrors(output, config_path, sync=False):
 	"""Read the current mirrors and retain mounted filesystems mirrors
 
 	@param config_path: string
-	@param sync: boolean, used to switch between SYNC and GENTOO_MIRRORS
-		make.conf variable target
+	@param sync: boolean, used to switch between GENTOO_MIRRORS in make.conf
+		and sync-uri in repos.conf/gentoo.conf
 	@rtype list
 	"""
 
@@ -139,7 +139,7 @@ def get_filesystem_mirrors(output, config_path, sync=False):
 	fsmirrors = []
 
 	if sync:
-		var = 'SYNC'
+		var = 'sync-uri'
 	else:
 		var = 'GENTOO_MIRRORS'
 
@@ -149,11 +149,11 @@ def get_filesystem_mirrors(output, config_path, sync=False):
 	except IOError:
 		return fsmirrors
 
-	""" Search for 'var' in make.conf and extract value """
+	""" Search for 'var' in config_path and extract value """
 	lex = shlex.shlex(f, posix=True)
 	lex.wordchars = string.digits+letters+"~!@#$%*_\:;?,./-+{}"
 	lex.quotes = "\"'"
-	p = re.compile('rsync://|http://|ftp://', re.IGNORECASE)
+	p = re.compile('rsync://|http://|ftp://|git://|svn://|cvs://', re.IGNORECASE)
 	while 1:
 		key = get_token(lex)
 		#output.write('get_filesystem_mirrors(): processing key = %s\n' % key, 2)

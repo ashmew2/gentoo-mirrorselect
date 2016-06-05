@@ -97,14 +97,11 @@ class MirrorSelect(object):
 		@param hosts: list of host urls to write
 		@param out: boolean, used to redirect output to stdout
 		@param config_path; string
-		@param sync: boolean, used to switch between sync-uri repos.conf target,
-			SYNC and GENTOO_MIRRORS make.conf variable target
+		@param sync: boolean, used to switch between sync-uri repos.conf target
+			and GENTOO_MIRRORS make.conf variable target
 		"""
 		if sync:
-			if 'repos.conf' in config_path:
-				var = "sync-uri"
-			else:
-				var = 'SYNC'
+			var = "sync-uri"
 		else:
 			var = 'GENTOO_MIRRORS'
 
@@ -328,20 +325,40 @@ class MirrorSelect(object):
 
 
 	def get_conf_path(self, rsync=False):
-		'''Checks for the existance of repos.conf or make.conf in /etc/portage/
-		Failing that it checks for it in /etc/
-		Failing in /etc/ it defaults to /etc/portage/make.conf
+		'''Get path to the config file depending upon rsync
+
+		For rsync = False, checks for the existence of make.conf
+		in /etc/portage/, failing which checks for it in /etc. Failing
+		that it defaults to /etc/portage/make.conf.
+
+		For rsync = True, checks if repos.conf in /etc/portage/ is a
+		directory. If it exists, but is not a directory, exits with an
+		error message. Checks if gentoo.conf exists in
+		/etc/portage/repos.conf directory. If it does not exist,
+		defaults to /usr/share/portage/config/repos.conf.
 
 		@rtype: string
 		'''
 		if rsync:
-			# startwith repos.conf
-			config_path = EPREFIX + '/etc/portage/repos.conf/gentoo.conf'
-			if not os.access(config_path, os.F_OK):
-				self.output.write("Failed access to gentoo.conf: "
-					"%s\n" % os.access(config_path, os.F_OK), 2)
-				return get_make_conf_path(EPREFIX)
-			return config_path
+			fallback_config_path = EPREFIX + '/usr/share/' + \
+				'portage/config/repos.conf'
+			config_path = EPREFIX + '/etc/portage/repos.conf/' + \
+				'gentoo.conf'
+			config_path_parent = EPREFIX + '/etc/portage/repos.conf'
+			error_message = "ERROR: %s should be a directory.\n"
+
+			# Make sure repos.conf exists and is a directory
+			if os.path.exists(config_path_parent) and not \
+				os.path.isdir(config_path_parent):
+					self.output.write(error_message \
+						% config_path_parent)
+					sys.exit(1)
+			elif os.path.isfile(config_path):
+				return config_path
+			else:
+				return fallback_config_path
+
+		# return make.conf path for GENTOO_MIRRORS
 		return get_make_conf_path(EPREFIX)
 
 
