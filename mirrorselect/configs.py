@@ -56,14 +56,22 @@ def get_make_conf_path(EPREFIX):
 		return config_path
 
 
-def write_make_conf(output, config_path, var, mirror_string):
+def write_make_conf(output, config_path, mirror_string, options):
 	"""Write the make.conf target changes
 
 	@param output: file, or output to print messages to
-	@param mirror_string: "var='hosts'" string to write
+	@param mirror_string: "GENTOO_MIRRORS='hosts'" string to write
 	@param config_path; string
+	@param options: dictionary, command line options
 	"""
+	var = 'GENTOO_MIRRORS'
 	output.write('\n')
+
+        # When -o is supplied, we just print this string and exit.
+	if options.output:
+		output.write(mirror_string)
+		sys.exit(0)
+
 	output.print_info('Modifying %s with new mirrors...\n' % config_path)
 	try:
 		config = open(config_path, 'r')
@@ -95,7 +103,7 @@ def write_make_conf(output, config_path, var, mirror_string):
 	sys.exit(0)
 
 
-def write_repos_conf(output, config_path, var, value):
+def write_repos_conf(output, config_path, value, options):
 	"""Saves the new var value to a ConfigParser style file
 
 	@param output: file, or output to print messages to
@@ -103,31 +111,53 @@ def write_repos_conf(output, config_path, var, value):
 	@param var: string; the variable to save teh value to.
 	@param value: string, the value to set var to
 	"""
+
+        # Get the path to backup reference repos.conf file
+	import mirrorselect.main
+
+	var = 'sync-uri'
 	output.write('\n')
-	output.print_info('Modifying %s with new mirrors...\n' % config_path)
+
 	try:
 		from configparser import ConfigParser
 	except ImportError:
 		from ConfigParser import ConfigParser
 	config = ConfigParser()
-	config.read(config_path)
+
+	config_exists = os.path.exists(config_path)
+
+	if config_exists:
+		config.read(config_path)
+	else:
+		config.read(mirrorselect.main.REFERENCE_REPOS_CONF)
+		if not options.output:
+			os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
 	if config.has_option('gentoo', var):
 		config.set('gentoo', var, value)
 
-		output.write('\tMoving %s to %s.backup\n' % (config_path, \
-			config_path))
-		shutil.move(config_path, config_path + '.backup')
+		if options.output:
+			config.write(sys.stdout)
+			sys.exit(0)
 
-		output.write('\tWriting new %s\n' % config_path)
+		if config_exists:
+			output.print_info('Creating %s with new mirrors...\n'
+					  % config_path)
+			output.write('\tMoving %s to %s.backup\n' %
+				     (config_path, config_path))
+			shutil.move(config_path, config_path + '.backup')
+			output.print_info('Modifying %s with new mirrors...\n'
+					  % config_path)
+		else:
+			output.write('\tWriting new %s\n' % config_path)
+
 		with open(config_path, 'w') as configfile:
 			config.write(configfile)
 
 		output.print_info('Done.\n')
 	else:
 		output.print_err("write_repos_conf(): Failed to find section 'gentoo',"
-			" variable: %s\nChanges NOT SAVED" %var)
-
+			" variable: %s\nChanges NOT SAVED" % var)
 
 def get_filesystem_mirrors(output, config_path, sync=False):
 	"""Read the current mirrors and retain mounted filesystems mirrors
@@ -138,6 +168,16 @@ def get_filesystem_mirrors(output, config_path, sync=False):
 	@rtype list
 	"""
 
+	if sync:
+		#return get_fsmirrors_repos_conf(output, config_path)
+		return []
+	else:
+		return get_fsmirrors_make_conf(output, config_path)
+
+def get_fsmirrors_make_conf(output, config_path):
+
+	fsmirrors = []
+
 	def get_token(lex):
 		'''internal function for getting shlex tokens
 		'''
@@ -147,12 +187,7 @@ def get_filesystem_mirrors(output, config_path, sync=False):
 			val = None
 		return val
 
-	fsmirrors = []
-
-	if sync:
-		var = 'sync-uri'
-	else:
-		var = 'GENTOO_MIRRORS'
+	var = 'GENTOO_MIRRORS'
 
 	output.write('get_filesystem_mirrors(): config_path = %s\n' % config_path, 2)
 	try:
@@ -194,5 +229,3 @@ def get_filesystem_mirrors(output, config_path, sync=False):
 
 	output.write('get_filesystem_mirrors(): fsmirrors = %s\n' % fsmirrors, 2)
 	return fsmirrors
-
-

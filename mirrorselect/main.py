@@ -60,6 +60,8 @@ EPREFIX = "@GENTOO_PORTAGE_EPREFIX@"
 if "GENTOO_PORTAGE_EPREFIX" in EPREFIX:
     EPREFIX = ''
 
+# Path to fallback repos.conf file for reference
+REFERENCE_REPOS_CONF = EPREFIX + '/usr/share/portage/config/repos.conf'
 
 class MirrorSelect(object):
 	'''Main operational class'''
@@ -91,34 +93,26 @@ class MirrorSelect(object):
 		return None
 
 
-	def change_config(self, hosts, out, config_path, sync=False):
+	def change_config(self, hosts, out, config_path, options):
 		"""Writes the config changes to the given file, or to stdout.
 
 		@param hosts: list of host urls to write
 		@param out: boolean, used to redirect output to stdout
 		@param config_path; string
-		@param sync: boolean, used to switch between sync-uri repos.conf target
+		@param options:boolean, used to switch between sync-uri repos.conf target
 			and GENTOO_MIRRORS make.conf variable target
 		"""
-		if sync:
-			var = "sync-uri"
-		else:
-			var = 'GENTOO_MIRRORS'
-
 		if hasattr(hosts[0], 'decode'):
 			hosts = [x.decode('utf-8') for x in hosts]
 
-		if var == "sync-uri" and out:
-			mirror_string = '%s = %s' % (var, ' '.join(hosts))
+                # We modify the repos.conf if it is a sync-uri related change
+		if options.rsync:
+			write_repos_conf(self.output, config_path,
+					' '.join(hosts), options)
 		else:
-			mirror_string = '%s="%s"' % (var, ' '.join(hosts))
-
-		if out:
-			self.write_to_output(mirror_string)
-		elif var == "sync-uri":
-			write_repos_conf(self.output, config_path, var, ' '.join(hosts))
-		else:
-			write_make_conf(self.output, config_path, var, mirror_string)
+			mirror_string = '%s="%s"' % ('GENTOO_MIRRORS', ' '.join(hosts))
+			write_make_conf(self.output, config_path, mirror_string,
+				 options)
 
 
 	@staticmethod
@@ -128,7 +122,7 @@ class MirrorSelect(object):
 		sys.exit(0)
 
 
-	def _parse_args(self, argv, config_path):
+	def _parse_args(self, argv):
 		"""
 		Does argument parsing and some sanity checks.
 		Returns an optparse Options object.
@@ -217,6 +211,12 @@ class MirrorSelect(object):
 				"by selecting an overly large size file.  You must also "
 				" use the -m, --md5 option.")
 		group.add_option(
+			"-g", "--target-file", action="store", default='',
+			help="Specify the target file to read the sync configuration from.
+			If the -o option is not used, this file will be overwritten with the
+                        new configuration. This can only be used with the "
+			"-r (rsync) switch. Use this during an installation.")
+		group.add_option(
 			"-m", "--md5", action="store",
 			default='bdf077b2e683c506bf9e8f2494eeb044',
 			help="An alternate file md5sum value used to compare the downloaded "
@@ -225,7 +225,9 @@ class MirrorSelect(object):
 			"-o", "--output", action="store_true", default=False,
 			help="Output Only Mode, this is especially useful "
 			"when being used during installation, to redirect "
-			"output to a file other than %s" % config_path)
+			"output to a file other than the default files like "
+			"make.conf or repos.conf or repos.conf/gentoo.conf. When used with 
+			the --target-file option, prevents the file from being updated")
 		group.add_option(
 			"-P", "--proxy", action="store",
 			default=None,
@@ -250,7 +252,6 @@ class MirrorSelect(object):
 			sys.exit(1)
 
 		options, args = parser.parse_args(argv[1:])
-
 		# sanity checks
 
 		# hack: check if more than one of these is set
@@ -278,8 +279,10 @@ class MirrorSelect(object):
 				'You do not appear to have netselect on your system. '
 				'You must use the -D flag')
 
-		if (os.getuid() != rootuid) and not options.output:
-			self.output.print_err('Must be root to write to %s!\n' % config_path)
+		if options.target_file != '' and not options.rsync:
+			self.output.print_err(
+				'--target-file flag (-g) used without -r. '
+				'You must use it with the -r flag (rsync only)')
 
 		if args:
 			self.output.print_err('Unexpected arguments passed.')
@@ -333,15 +336,11 @@ class MirrorSelect(object):
 
 		For rsync = True, checks if repos.conf in /etc/portage/ is a
 		directory. If it exists, but is not a directory, exits with an
-		error message. Checks if gentoo.conf exists in
-		/etc/portage/repos.conf directory. If it does not exist,
-		defaults to /usr/share/portage/config/repos.conf.
-
+		error message. Otherwise, return
+		/etc/portage/repos.conf/gentoo.conf as the desierd config file.
 		@rtype: string
 		'''
 		if rsync:
-			fallback_config_path = EPREFIX + '/usr/share/' + \
-				'portage/config/repos.conf'
 			config_path = EPREFIX + '/etc/portage/repos.conf/' + \
 				'gentoo.conf'
 			config_path_parent = EPREFIX + '/etc/portage/repos.conf'
@@ -353,10 +352,8 @@ class MirrorSelect(object):
 					self.output.write(error_message \
 						% config_path_parent)
 					sys.exit(1)
-			elif os.path.isfile(config_path):
-				return config_path
 			else:
-				return fallback_config_path
+				return config_path
 
 		# return make.conf path for GENTOO_MIRRORS
 		return get_make_conf_path(EPREFIX)
@@ -367,17 +364,37 @@ class MirrorSelect(object):
 
 		@param argv: list of command line arguments to parse
 		"""
-		config_path = self.get_conf_path()
-		options = self._parse_args(argv, config_path)
+		options = self._parse_args(argv)
 		self.output.verbosity = options.verbosity
+
+		# Set the config_path to the file we will modify.
+		# get_conf_path() will respect the rsync flag automatically.
+		if options.target_file == '':
+			config_path = self.get_conf_path(options.rsync)
+		else:
+			config_path = os.path.abspath(options.target_file)
+
 		self.output.write("main(); config_path = %s\n" % config_path, 2)
 
-		# reset config_path to find repos.conf/gentoo.conf if it exists
-		if options.rsync:
-			config_path = self.get_conf_path(options.rsync)
-			self.output.write("main(); reset config_path = %s\n" % config_path, 2)
-		else:
-			self.output.write("main(); rsync = %s\n" % str(options.rsync),2)
+		# Confirm that the config_path is a file if it exists
+		if os.path.exists(config_path) and not os.path.isfile(
+			config_path):
+			self.output.print_err("Exists and not a file: "
+				" to %s!\n" % config_path)
+
+		if not options.output:
+			# Check if we have permission to write in the specified dir.
+			# As the user might give a nested directory target, in which
+			# multiple directories don't exist,  we must handle it.
+			dir_to_check = os.path.dirname(config_path)
+			while dir_to_check != '/':
+				if os.access(os.path.dirname(config_path), os.W_OK):
+					break;
+				dir_to_check = os.path.dirname(dir_to_check)
+
+			if dir_to_check == '/':
+				self.output.print_err("Permission denied: Cannot write"
+					" to %s!\n" % config_path)
 
 		fsmirrors = get_filesystem_mirrors(self.output,
 			config_path, options.rsync)
@@ -393,7 +410,7 @@ class MirrorSelect(object):
 
 		if len(urls):
 			self.change_config(fsmirrors + urls, options.output,
-				config_path, options.rsync)
+				config_path, options)
 		else:
 			self.output.write("No search results found. "
 				"Check your filter settings and re-run mirrorselect\n")
